@@ -11,8 +11,9 @@ birthdays.setContainerForTest({ querySelector: () => null });
 
 function control(value = '') {
   return {
-    value, checked: false, disabled: false, textContent: '', handlers: {},
+    value, checked: false, disabled: false, textContent: '', handlers: {}, focusCalls: 0,
     addEventListener(type, fn) { this.handlers[type] = fn; },
+    focus() { this.focusCalls += 1; document.activeElement = this; },
     fire(type) { return this.handlers[type]?.(); },
   };
 }
@@ -48,11 +49,13 @@ async function open(withBirthday = [], withoutBirthday = []) {
   return {
     html, boxes, toasts, toggle: controls.get('#bd-import-toggle'),
     submit: controls.get('#bd-import-submit'), status: controls.get('#bd-import-status'),
+    cancel: controls.get('#bd-import-cancel'),
   };
 }
 
 test.afterEach(() => {
-  for (const key of ['__apiStub', '__openModal', '__closeModal']) delete globalThis[key];
+  for (const key of ['__apiStub', '__openModal', '__closeModal', '__isOwnModalOpen']) delete globalThis[key];
+  delete document.activeElement;
 });
 
 test('bulk and individual selection keep the action label, count and announcement in sync', async () => {
@@ -200,4 +203,30 @@ test('a reload failure preserves the partial-save message and keeps import retry
   assert.equal(submit.disabled, false);
   assert.equal(toggle.disabled, false);
   assert.ok(boxes.every((box) => box.checked && !box.disabled));
+});
+
+test('a failed import hands focus back to the import button only while its dialog is open', async () => {
+  const failing = async () => { throw new Error('Offline'); };
+
+  const lost = await open([candidate(1)]);
+  lost.toggle.fire('click');
+  globalThis.__apiStub.post = failing;
+  document.activeElement = document.body;
+  await lost.submit.fire('click');
+  assert.equal(lost.submit.focusCalls, 1, 'focus dropped by the disabled button returns for the retry');
+
+  const moved = await open([candidate(1)]);
+  moved.toggle.fire('click');
+  globalThis.__apiStub.post = failing;
+  document.activeElement = moved.cancel;
+  await moved.submit.fire('click');
+  assert.equal(moved.submit.focusCalls, 0, 'focus the user moved elsewhere is left alone');
+
+  const closed = await open([candidate(1)]);
+  closed.toggle.fire('click');
+  globalThis.__apiStub.post = failing;
+  globalThis.__isOwnModalOpen = () => false;
+  document.activeElement = document.body;
+  await closed.submit.fire('click');
+  assert.equal(closed.submit.focusCalls, 0, 'a dialog closed during the request gets no focus');
 });

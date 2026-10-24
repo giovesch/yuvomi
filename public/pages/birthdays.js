@@ -1,5 +1,5 @@
 import { api } from '/api.js';
-import { openModal as openSharedModal, closeModal, advancedSection, captureModalContext, captureOpenContext, isModalContextCurrent, swapFieldsKeepingDirtyBase, refocusAfterRender } from '/components/modal.js';
+import { openModal as openSharedModal, closeModal, advancedSection, captureModalContext, captureOpenContext, isModalContextCurrent, swapFieldsKeepingDirtyBase, isOwnModalOpen, refocusAfterRender } from '/components/modal.js';
 import { errorSentence, isAlreadyDeleted, loadErrorSentence } from '/utils/friendly-error.js';
 import { stagger, scheduleUndoableDelete } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
@@ -1444,6 +1444,13 @@ async function openImportModal() {
         } finally {
           submitting = false;
           refresh();
+          // The button was disabled during the request, which drops keyboard
+          // focus. Hand it back for the retry while this dialog is still open,
+          // unless the user has moved focus elsewhere in the meantime.
+          const active = document.activeElement;
+          if (isOwnModalOpen(dialog) && (!active || active === document.body || active === submitBtn)) {
+            submitBtn.focus();
+          }
         }
       });
     },

@@ -1,5 +1,5 @@
 import { api } from '/api.js';
-import { openModal as openSharedModal, closeModal, advancedSection, captureModalContext, captureOpenContext, isModalContextCurrent, swapFieldsKeepingDirtyBase } from '/components/modal.js';
+import { openModal as openSharedModal, closeModal, advancedSection, captureModalContext, captureOpenContext, isModalContextCurrent, swapFieldsKeepingDirtyBase, refocusAfterRender } from '/components/modal.js';
 import { errorSentence, isAlreadyDeleted, loadErrorSentence } from '/utils/friendly-error.js';
 import { stagger, scheduleUndoableDelete } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
@@ -1379,6 +1379,8 @@ async function openImportModal() {
       const status = panel.querySelector('#bd-import-status');
       const selectable = [...panel.querySelectorAll('.bd-import__list input:not(:disabled)')];
       let submitting = false;
+      // A retry continues the same import, including batches already saved.
+      let imported = 0;
 
       const selectedIds = () =>
         selectable.filter((cb) => cb.checked).map((cb) => Number(cb.value));
@@ -1421,7 +1423,6 @@ async function openImportModal() {
         submitting = true;
         refresh();
         try {
-          let imported = 0;
           // Keep large selections within the API's 500-contact request limit.
           for (let offset = 0; offset < ids.length; offset += 500) {
             const res = await api.post('/birthdays/import', { contact_ids: ids.slice(offset, offset + 500) });
@@ -1432,7 +1433,14 @@ async function openImportModal() {
           renderList({ repaint: true, motion: true });
           closeModal({ force: true, context: dialog });
         } catch (err) {
-          window.yuvomi?.showToast(errorSentence(err), 'danger');
+          if (imported > 0) {
+            window.yuvomi?.showToast(`${t('birthdays.importSuccess', { count: imported })} ${errorSentence(err)}`, 'warning');
+            await reloadAfterSave(() => loadData());
+            renderList({ repaint: true });
+            refocusAfterRender();
+          } else {
+            window.yuvomi?.showToast(errorSentence(err), 'danger');
+          }
         } finally {
           submitting = false;
           refresh();

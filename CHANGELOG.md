@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Birthday import offers "Select all" and "Deselect all".** Select every contact
   with a birthday that has not already been imported, or clear the selection, with
-  one button above the list. Large selections are imported in batches.
+  one button above the list. Large selections are imported in batches. If a later
+  batch fails, the saved count remains visible in the warning and the list is
+  refreshed; retrying reports the total across successful batches.
 
 - **A contact with a birthday can be added to Birthdays from its detail view** (#2149). Until now
   only contacts whose birthday had been imported showed a way to Birthdays. A contact with a birth

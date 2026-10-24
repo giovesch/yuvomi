@@ -20,6 +20,8 @@ function control(value = '') {
 const candidate = (id, extra = {}) => ({ id, name: `Contact ${id}`, birthday: '1990-07-18', ...extra });
 
 async function open(withBirthday = [], withoutBirthday = []) {
+  const toasts = [];
+  window.yuvomi.showToast = (...args) => toasts.push(args);
   const controls = new Map([
     ['#bd-import-submit', control()], ['#bd-import-cancel', control()],
     ['#bd-import-status', control()],
@@ -44,7 +46,7 @@ async function open(withBirthday = [], withoutBirthday = []) {
   };
   await birthdays.openImportModal();
   return {
-    html, boxes, toggle: controls.get('#bd-import-toggle'),
+    html, boxes, toasts, toggle: controls.get('#bd-import-toggle'),
     submit: controls.get('#bd-import-submit'), status: controls.get('#bd-import-status'),
   };
 }
@@ -125,10 +127,16 @@ test('large selections import in bounded batches and cannot change or submit twi
   assert.ok(toasts.some(([message, kind]) => kind === 'success' && /"count":501/.test(message)));
 });
 
-test('a failed later batch keeps the selection available for an idempotent retry', async () => {
-  const { toggle, submit, boxes } = await open(Array.from({ length: 501 }, (_, i) => candidate(i + 1)));
+test('a failed later batch shows saved progress, reloads the list and preserves the total on retry', async () => {
+  const { toggle, submit, boxes, toasts } = await open(Array.from({ length: 501 }, (_, i) => candidate(i + 1)));
   toggle.fire('click');
   const imported = new Set();
+  let reloads = 0;
+  globalThis.__apiStub.get = async (path) => {
+    assert.equal(path, '/birthdays');
+    reloads += 1;
+    return { data: [...imported].map((id) => ({ id })) };
+  };
   let calls = 0;
   globalThis.__apiStub.post = async (_path, { contact_ids }) => {
     calls += 1;
@@ -139,10 +147,57 @@ test('a failed later batch keeps the selection available for an idempotent retry
   };
   await submit.fire('click');
   assert.equal(imported.size, 500, 'completed batches remain imported after a later failure');
+  assert.equal(reloads, 1, 'saved rows are reloaded even when the import is incomplete');
+  assert.equal(birthdays.state.birthdays.length, 500);
+  assert.ok(toasts.some(([message, kind]) => kind === 'warning'
+    && message.includes('birthdays.importSuccess{"count":500}')),
+  'the partial failure names the saved count');
+  assert.ok(!toasts.some(([, kind]) => kind === 'success'), 'an incomplete import is not reported as complete');
   assert.equal(toggle.disabled, false);
   assert.equal(submit.disabled, false);
   assert.ok(boxes.every((b) => b.checked && !b.disabled));
   await submit.fire('click');
   assert.equal(calls, 4);
   assert.equal(imported.size, 501, 'retry imports the remainder without duplicates');
+  assert.equal(reloads, 2);
+  assert.ok(toasts.some(([message, kind]) => kind === 'success'
+    && message.includes('birthdays.importSuccess{"count":501}')),
+  'the final count includes the earlier successful batch');
+});
+
+test('a first-batch failure reports only the error and leaves the controls ready for retry', async () => {
+  const { toggle, submit, boxes, toasts } = await open([candidate(1)]);
+  toggle.fire('click');
+  let reloads = 0;
+  globalThis.__apiStub.get = async () => { reloads += 1; return { data: [] }; };
+  globalThis.__apiStub.post = async () => { throw new Error('Offline'); };
+  await submit.fire('click');
+  assert.equal(reloads, 0, 'nothing saved means there is nothing to refresh');
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0][1], 'danger');
+  assert.ok(!toasts[0][0].includes('birthdays.importSuccess'));
+  assert.equal(submit.disabled, false);
+  assert.equal(toggle.disabled, false);
+  assert.ok(boxes[0].checked && !boxes[0].disabled);
+});
+
+test('a reload failure preserves the partial-save message and keeps import retry available', async (t) => {
+  const { toggle, submit, boxes, toasts } = await open(Array.from({ length: 501 }, (_, i) => candidate(i + 1)));
+  toggle.fire('click');
+  t.mock.method(console, 'warn', () => {});
+  let calls = 0;
+  globalThis.__apiStub.post = async () => {
+    calls += 1;
+    if (calls === 2) throw new Error('Import unavailable');
+    return { data: { imported: 500 } };
+  };
+  globalThis.__apiStub.get = async () => { throw new Error('Reload unavailable'); };
+  await submit.fire('click');
+  assert.equal(calls, 2, 'a failed reload does not repeat any writes');
+  assert.ok(toasts.some(([message, kind]) => kind === 'warning'
+    && message.includes('birthdays.importSuccess{"count":500}')));
+  assert.ok(toasts.some(([message, kind]) => kind === 'warning' && message === 'common.savedReloadFailed'));
+  assert.equal(submit.disabled, false);
+  assert.equal(toggle.disabled, false);
+  assert.ok(boxes.every((box) => box.checked && !box.disabled));
 });

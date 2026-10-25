@@ -40,6 +40,8 @@ async function open(withBirthday = [], withoutBirthday = []) {
     options.onSave({
       querySelector: (selector) => controls.get(selector) ?? null,
       querySelectorAll: (selector) => {
+        // R23 link buttons for suggested matches are not part of the selection.
+        if (selector === '[data-import-link]') return [];
         assert.equal(selector, '.bd-import__list input:not(:disabled)');
         return boxes;
       },
@@ -94,7 +96,12 @@ test('bulk and individual selection keep the action label, count and announcemen
 });
 
 test('no bulk action appears when there are no eligible contacts', async () => {
-  for (const rows of [[], [candidate(1, { already_imported: true })]]) {
+  for (const rows of [
+    [],
+    [candidate(1, { already_imported: true })],
+    // A row suggesting a link to an existing birthday has no checkbox to select.
+    [candidate(1, { suggested_birthday_id: 9, suggested_birthday_name: 'Ingrid Miller' })],
+  ]) {
     const dialog = await open(rows, [{ id: 2, name: 'No birthday' }]);
     assert.equal(dialog.toggle, undefined);
     assert.equal(dialog.boxes.length, 0);
